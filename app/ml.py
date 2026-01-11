@@ -104,20 +104,21 @@ def run_forecast():
         df[c] = pd.to_numeric(df[c], errors="coerce")
 
     # Predicciones 365 días (diarias)
-    temp = fit_predict(df, "temp_media")
-    hum  = fit_predict(df, "hum_media", cap99=True)
-    rad  = fit_predict(df, "rad_media", non_negative=True)
-    pres = fit_predict(df, "pres_media")
-    prec = fit_predict(df, "precip_total", non_negative=True, log1p=True)
-    wind = fit_predict(df, "viento_media", non_negative=True)
+# Predicciones y renombre de yhat ANTES del merge
+    temp = fit_predict(df, "temp_media").rename(columns={"yhat": "temp_media"})
+    hum  = fit_predict(df, "hum_media", cap99=True).rename(columns={"yhat": "hum_media"})
+    rad  = fit_predict(df, "rad_media", non_negative=True).rename(columns={"yhat": "rad_media"})
+    pres = fit_predict(df, "pres_media").rename(columns={"yhat": "pres_media"})
+    prec = fit_predict(df, "precip_total", non_negative=True, log1p=True).rename(columns={"yhat": "precip_total"})
+    wind = fit_predict(df, "viento_media", non_negative=True).rename(columns={"yhat": "viento_media"})
 
-    out = temp.merge(hum, on="fecha", suffixes=("_temp", "_hum"))
-    out = out.merge(rad, on="fecha")
-    out = out.merge(pres, on="fecha")
-    out = out.merge(prec, on="fecha")
-    out = out.merge(wind, on="fecha")
+    # Merge seguro (sin columnas duplicadas)
+    out = temp.merge(hum, on="fecha", how="inner")
+    out = out.merge(rad, on="fecha", how="inner")
+    out = out.merge(pres, on="fecha", how="inner")
+    out = out.merge(prec, on="fecha", how="inner")
+    out = out.merge(wind, on="fecha", how="inner")
 
-    out.columns = ["fecha", "temp_media", "hum_media", "rad_media", "pres_media", "precip_total", "viento_media"]
 
     trained_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
