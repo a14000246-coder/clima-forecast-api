@@ -4,3 +4,4 @@ pandas
 numpy
 prophet
 requests
+scikit-learn

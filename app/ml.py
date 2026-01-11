@@ -142,3 +142,95 @@ def run_forecast():
         "csv_generated": csv_path,
         "php_import_result": php_result[:2000],
     }
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+def compute_metrics(y_true, y_pred):
+    y_true = np.array(y_true, dtype=float)
+    y_pred = np.array(y_pred, dtype=float)
+
+    # Evitar división por 0 en MAPE
+    mask = y_true != 0
+    mape = float(np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100) if mask.any() else None
+
+    return {
+        "mae": round(float(mean_absolute_error(y_true, y_pred)), 4),
+        "rmse": round(float(np.sqrt(mean_squared_error(y_true, y_pred))), 4),
+        "r2": round(float(r2_score(y_true, y_pred)), 4),
+        "mape": round(float(mape), 4) if mape is not None else None,
+    }
+
+def evaluate_variable(df, col, cap99=False, non_negative=False, log1p=False, test_ratio=0.2):
+    data = df[["fecha", col]].dropna().copy()
+    data["fecha"] = pd.to_datetime(data["fecha"], errors="coerce")
+    data = data.dropna(subset=["fecha"]).sort_values("fecha")
+    data[col] = pd.to_numeric(data[col], errors="coerce")
+    data = data.dropna(subset=[col])
+
+    n = len(data)
+    if n < 60:
+        raise RuntimeError(f"No hay suficientes datos para evaluar {col} (mínimo ~60 días).")
+
+    split = int(n * (1 - test_ratio))
+    train = data.iloc[:split].copy()
+    test = data.iloc[split:].copy()
+
+    train_p = train.rename(columns={"fecha": "ds", col: "y"})[["ds", "y"]].copy()
+    test_p  = test.rename(columns={"fecha": "ds", col: "y"})[["ds", "y"]].copy()
+
+    if log1p:
+        train_p["y"] = np.log1p(np.maximum(train_p["y"].astype(float), 0))
+
+    m = Prophet(yearly_seasonality=True, weekly_seasonality=False, daily_seasonality=False)
+    m.fit(train_p)
+
+    future = m.make_future_dataframe(periods=len(test_p), freq="D")
+    fc = m.predict(future).tail(len(test_p))[["ds", "yhat"]].copy()
+
+    y_pred = fc["yhat"].to_numpy()
+    if log1p:
+        y_pred = np.expm1(y_pred)
+    if non_negative:
+        y_pred = np.maximum(y_pred, 0)
+    if cap99:
+        y_pred = np.minimum(y_pred, 99.99)
+
+    y_true = test_p["y"].to_numpy(dtype=float)
+    # si hiciste log1p en train, y_true sigue en escala normal (correcto)
+
+    return compute_metrics(y_true, y_pred), {
+        "test_days": int(len(test_p)),
+        "train_days": int(len(train_p)),
+        "test_start": str(test_p["ds"].min().date()),
+        "test_end": str(test_p["ds"].max().date()),
+    }
+
+def get_model_metrics():
+    data_path = os.getenv("DATA_PATH", "data/clima_diario.csv")
+    df = pd.read_csv(data_path)
+
+    # Métricas por variable
+    metrics = {}
+
+    m_temp, info = evaluate_variable(df, "temp_media")
+    metrics["temp_media"] = {**m_temp, **info}
+
+    m_hum, info = evaluate_variable(df, "hum_media", cap99=True)
+    metrics["hum_media"] = {**m_hum, **info}
+
+    m_rad, info = evaluate_variable(df, "rad_media", non_negative=True)
+    metrics["rad_media"] = {**m_rad, **info}
+
+    m_pres, info = evaluate_variable(df, "pres_media")
+    metrics["pres_media"] = {**m_pres, **info}
+
+    m_prec, info = evaluate_variable(df, "precip_total", non_negative=True, log1p=True)
+    metrics["precip_total"] = {**m_prec, **info}
+
+    m_wind, info = evaluate_variable(df, "viento_media", non_negative=True)
+    metrics["viento_media"] = {**m_wind, **info}
+
+    return {
+        "model_version": MODEL_VERSION,
+        "evaluated_at_utc": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "metrics": metrics,
+    }

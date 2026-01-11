@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from .ml import run_forecast
 from .settings import RUN_TOKEN
+from .ml import get_model_metrics
 
 app = FastAPI(title="Clima Forecast API")
 
@@ -14,3 +15,6 @@ def forecast_run(token: str):
         raise HTTPException(status_code=401, detail="Token inválido")
     return run_forecast()
 
+@app.get("/metrics")
+def metrics():
+    return get_model_metrics()
